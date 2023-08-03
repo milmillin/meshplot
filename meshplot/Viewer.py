@@ -407,7 +407,7 @@ class Viewer():
                 print("Face updates are currently only possible in vertex color mode.")
                 return
             f = faces.astype("uint32", copy=False).ravel()
-            print(obj["geometry"].attributes)
+            # print(obj["geometry"].attributes)
             obj["geometry"].attributes["index"].array = f
             #self.wireframe.attributes["position"].array = v # Wireframe updates?
             obj["geometry"].attributes["index"].needsUpdate = True
