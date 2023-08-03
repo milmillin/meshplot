@@ -374,6 +374,10 @@ class Viewer():
             del self.__objects[obj_id]
         self.__update_view()
 
+    def update_edges(self, oid, vertices, edges):
+        obj = self.__objects[oid]
+        obj["geometry"].positions = vertices[edges].astype(np.dtype("float32"))
+
     def update_object(self, oid=0, vertices=None, colors=None, faces=None):
         obj = self.__objects[oid]
         if type(vertices) != type(None):
