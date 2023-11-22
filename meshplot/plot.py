@@ -1,116 +1,38 @@
-from .Viewer import Viewer
-import numpy as np
-from ipywidgets import Output, HBox
-import uuid
+from ipywidgets import GridspecLayout
 
-rendertype = "JUPYTER" # "OFFLINE"
-def jupyter():
-    global rendertype
-    rendertype = "JUPYTER"
+from .viewer import Plot, Settings, MeshShading, LineShading, PointShading
 
-def offline():
-    global rendertype
-    rendertype = "OFFLINE"
 
-def website():
-    global rendertype
-    rendertype = "WEBSITE"
+class PlotGrid:
+    def __init__(
+        self,
+        rows: int = 1,
+        cols: int = 1,
+        *,
+        settings: Settings = Settings(),
+        mesh_shading: MeshShading = MeshShading(),
+        line_shading: LineShading = LineShading(),
+        point_shading: PointShading = PointShading(),
+        bbox_shading: LineShading = LineShading(line_color="blue"),
+    ):
+        self.__layout = GridspecLayout(rows, cols, justify_items="center", align_items="center")
+        self.__plots: list[list[Plot]] = []
+        for i in range(rows):
+            row: list[Plot] = []
+            for j in range(cols):
+                viewer = Plot(
+                    settings=settings,
+                    mesh_shading=mesh_shading,
+                    line_shading=line_shading,
+                    point_shading=point_shading,
+                    bbox_shading=bbox_shading,
+                )
+                self.__layout[i, j] = viewer._renderer
+                row.append(viewer)
+            self.__plots.append(row)
 
-class Subplot():
-    def __init__(self, data, view, s):
-        if data == None:
-            self.rows = []
-            self.hboxes = []
-        else:
-            self.rows = data.rows
+    def __getitem__(self, indices: tuple[int, int]) -> Plot:
+        return self.__plots[indices[0]][indices[1]]
 
-        if s[0] != 1 or s[1] != 1:
-            if data == None: # Intialize subplot array
-                cnt = 0
-                for r in range(s[0]):
-                    row = []
-                    for c in range(s[1]):
-                        row.append(Output())
-                        cnt += 1
-                    self.rows.append(row)
-
-                for r in self.rows:
-                    hbox = HBox(r)
-                    if rendertype == "JUPYTER":
-                        display(hbox)
-                    self.hboxes.append(hbox)
-
-            out = self.rows[int(s[2]/s[1])][s[2]%s[1]]
-            if rendertype == "JUPYTER":
-                with out:
-                    display(view._renderer)
-            self.rows[int(s[2]/s[1])][s[2]%s[1]] = view
-
-    def save(self, filename=""):
-        if filename == "":
-            uid = str(uuid.uuid4()) + ".html"
-        else:
-            filename = filename.replace(".html", "")
-            uid = filename + '.html'
-
-        s = ""
-        imports = True
-        for r in self.rows:
-            for v in r:
-                s1 = v.to_html(imports=imports, html_frame=False)
-                s = s + s1
-                imports = False
-
-        s = "<html>\n<body>\n" + s + "\n</body>\n</html>"
-        with open(uid, "w") as f:
-            f.write(s)
-        print("Plot saved to file %s."%uid)
-
-    def to_html(self, imports=True, html_frame=True):
-        s = ""
-        for r in self.rows:
-            for v in r:
-                s1 = v.to_html(imports=imports, html_frame=html_frame)
-                s = s + s1
-                imports = False
-
-        return s
-
-def plot(v, f=None, c=None, uv=None, n=None, shading={}, plot=None, return_plot=True, filename="", texture_data=None, **kwargs):#, return_id=False):
-    shading.update(kwargs)
-    if not plot:
-        view = Viewer(shading)
-    else:
-        view = plot
-        view.reset()
-    if type(f) == type(None): # Plot pointcloud
-        obj_id = view.add_points(v, c, shading=shading)
-    elif type(f) == np.ndarray and len(f.shape) == 2 and f.shape[1] == 2: # Plot edges
-        obj_id = view.add_edges(v, f, shading=shading)
-    else: # Plot mesh
-        obj_id = view.add_mesh(v, f, c, uv=uv, n=n, shading=shading, texture_data=texture_data)
-
-    if not plot and rendertype == "JUPYTER":
-        display(view._renderer)
-
-    if rendertype == "OFFLINE":
-        view.save(filename)
-
-    if return_plot or rendertype == "WEBSITE":
-        return view
-
-def subplot(v, f=None, c=None, uv=None, n=None, shading={}, s=[1, 1, 0], data=None, texture_data=None, **kwargs):
-    shading.update(kwargs)
-    shading["width"] = 400
-    shading["height"] = 400
-    view = Viewer(shading)
-    if type(f) == type(None): # Plot pointcloud
-        obj_id = view.add_points(v, c, shading=shading)
-    elif type(f) == np.ndarray and len(f.shape) == 2 and f.shape[1] == 2: # Plot edges
-        obj_id = view.add_edges(v, f, shading=shading)
-    else: # Plot mesh
-        obj_id = view.add_mesh(v, f, c, uv=uv, n=n, shading=shading, texture_data=texture_data)
-
-    subplot = Subplot(data, view, s)
-    if data == None or rendertype == "WEBSITE":
-        return subplot
+    def _repr_mimebundle_(self, **kwargs):
+        return self.__layout._repr_mimebundle_(**kwargs)

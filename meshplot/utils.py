@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 from matplotlib.colors import Normalize
 from typing import Optional
 
@@ -26,9 +25,7 @@ def get_colors(
     return cmap(norm(inp))[..., :3]
 
 
-def gen_checkers(
-    n_checkers_x: int, n_checkers_y: int, width: int = 256, height: int = 256
-) -> np.ndarray:
+def gen_checkers(n_checkers_x: int, n_checkers_y: int, width: int = 256, height: int = 256) -> np.ndarray:
     """
     returns: (width, height, 3)
     """
@@ -49,7 +46,10 @@ def gen_checkers(
     return array
 
 
-def gen_circle(width=256, height=256):
+def gen_circle(width: int = 256, height: int = 256) -> np.ndarray:
+    """
+    returns: (width, height, 4)
+    """
     xx, yy = np.mgrid[:width, :height]
     circle = (xx - width / 2 + 0.5) ** 2 + (yy - height / 2 + 0.5) ** 2
     array = np.ones((width, height, 4), dtype="float32")
@@ -60,7 +60,7 @@ def gen_circle(width=256, height=256):
     return array
 
 
-def is_notebook():
+def is_notebook() -> bool:
     try:
         shell = get_ipython().__class__.__name__  # type: ignore
         if shell == "ZMQInteractiveShell":

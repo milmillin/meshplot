@@ -1,13 +1,11 @@
 import numpy as np
-import ipywidgets as widgets
-from ipywidgets import HTML, Text, Output, VBox, HBox, interact, embed
-
-# from pythreejs import *
+from ipywidgets import embed
 import pythreejs as p3s
 from IPython.display import display
 import uuid
 from typing import Literal, TypedDict, Optional, Any, Union
 from dataclasses import dataclass
+from pathlib import Path
 
 from .utils import get_colors, gen_circle, gen_checkers
 
@@ -92,18 +90,46 @@ class _MeshObject:
 ObjectID = int
 
 
-class Viewer:
+class Plot:
     def __init__(
         self,
+        v: Optional[np.ndarray] = None,
+        f: Optional[np.ndarray] = None,
+        c: Optional[np.ndarray] = None,
+        *,
+        uv: Optional[np.ndarray] = None,
+        n: Optional[np.ndarray] = None,
+        texture_data: Optional[np.ndarray] = None,
         settings: Settings = Settings(),
         mesh_shading: MeshShading = MeshShading(),
         line_shading: LineShading = LineShading(),
         point_shading: PointShading = PointShading(),
+        bbox_shading: LineShading = LineShading(line_color="blue"),
     ):
+        """
+        Create a mesh viewer.
+
+        Plot Mesh
+        - v: (n_V, 3) vertices
+        - f: (n_F, 3) faces indexed into v
+        - c: (3,), (n_V, 3), (n_F, 3), (n_V,), or (n_F,) colors
+        - uv: TODO
+        - n: (n_V, 3) normal
+        - texture_data: TODO
+
+        Plot Edges
+        - v: (n_V, 3) vertices
+        - f: (n_E, 2) edges indexed into v
+
+        Plot Points
+        - v: (n_V, 3) vertices
+        - c: (3,), (n_V, 3), or (n_V,) colors
+        """
         self.__s = settings
         self.__ms = mesh_shading
         self.__ls = line_shading
         self.__ps = point_shading
+        self.__bs = bbox_shading
 
         self._light = p3s.DirectionalLight(color="white", position=[0, 0, 1], intensity=0.6)  # type: ignore
         self._light2 = p3s.AmbientLight(intensity=0.5)  # type: ignore
@@ -125,11 +151,16 @@ class Viewer:
             antialias=self.__s.antialias,
         )
 
-        # self.__meshes: list[_MeshObject] = []
-        # self.__lines: list[_LineObject] = []
-        # self.__points: list[_PointObject] = []
         self.__count: int = 0
         self.__obj: dict[ObjectID, Union[_MeshObject, _LineObject, _PointObject]] = {}
+
+        if v is not None:
+            if f is None:
+                self.add_points(v, c)
+            elif len(f.shape) == 2 and f.shape[1] == 2:
+                self.add_edges(v, f)
+            else:
+                self.add_mesh(v, f, c, uv, n, texture_data)
 
     def add_mesh(
         self,
@@ -226,7 +257,7 @@ class Viewer:
         if mesh_shading.wireframe:
             wf_geometry = p3s.WireframeGeometry(mesh.geometry)  # WireframeGeometry
             wf_material = p3s.LineBasicMaterial(color=mesh_shading.wire_color, linewidth=mesh_shading.wire_width)
-            wireframe = p3s.LineSegments(wf_geometry, wf_material)
+            wireframe = p3s.LineSegments(geometry=wf_geometry, material=wf_material)  # type: ignore
             mesh.add(wireframe)
 
         # Bounding box setup
@@ -234,7 +265,7 @@ class Viewer:
         if mesh_shading.bbox:
             v_box, e_box = self.__get_bbox(v)
             if bbox_shading is None:
-                bbox_shading = self.__ls
+                bbox_shading = self.__bs
             bbox = self.__compute_line_object(v_box[e_box], bbox_shading)
             mesh.add(bbox.mesh)
             bbox = (bbox, v_box, e_box)
@@ -291,7 +322,7 @@ class Viewer:
         if line_shading is None:
             line_shading = self.__ls
 
-        return self.__add_object(self.__compute_line_object(vertices[edges], line_shading))
+        return self.__add_object(self.__compute_line_object(vertices[edges].reshape(-1, 3), line_shading))
 
     def add_points(
         self,
@@ -309,7 +340,7 @@ class Viewer:
         ma = np.max(points, axis=0)
 
         g_attributes = {"position": p3s.BufferAttribute(points, normalized=False)}
-        m_attributes: dict[str, Any] = {"size": point_shading.point_shape}
+        m_attributes: dict[str, Any] = {"size": point_shading.point_size}
 
         if point_shading.point_shape == "circle":  # Plot circles
             tex = p3s.DataTexture(data=gen_circle(16, 16), format="RGBAFormat", type="FloatType")
@@ -428,6 +459,87 @@ class Viewer:
         obj.geometry.positions = vertices[edges].astype(np.dtype("float32"))
 
     # --------------
+    # Export
+
+    def display(self) -> None:
+        display(self._renderer)
+
+    def to_html(self, imports: bool = True, html_frame: bool = True) -> str:
+        # Bake positions (fixes centering bug in offline rendering)
+        if len(self.__obj) == 0:
+            return ""
+
+        ma = np.zeros((len(self.__obj), 3))
+        mi = np.zeros((len(self.__obj), 3))
+        for r, obj in enumerate(self.__obj):
+            ma[r] = self.__obj[obj].max
+            mi[r] = self.__obj[obj].min
+        ma = np.max(ma, axis=0)
+        mi = np.min(mi, axis=0)
+        diag = np.linalg.norm(ma - mi)
+        mean = (ma - mi) / 2 + mi
+        for _, obj in self.__obj.items():
+            if isinstance(obj, _MeshObject):
+                obj.geometry.attributes["position"].array -= mean
+                if obj.bbox is not None:
+                    bbox, _, _ = obj.bbox
+                    bbox.geometry.positions -= mean
+            elif isinstance(obj, _PointObject):
+                obj.geometry.attributes["position"].array -= mean
+            else:
+                obj.geometry.positions -= mean
+
+        scale = self.__s.scale * (diag)
+        self._orbit.target = (0.0, 0.0, 0.0)
+        self._cam.lookAt([0.0, 0.0, 0.0])
+        self._cam.position = (0.0, 0.0, scale)
+        self._light.position = (0.0, 0.0, scale)
+
+        state = embed.dependency_state(self._renderer)
+
+        # Somehow these entries are missing when the state is exported in python.
+        # Exporting from the GUI works, so we are inserting the missing entries.
+        for k in state:
+            if state[k]["model_name"] == "OrbitControlsModel":
+                state[k]["state"]["maxAzimuthAngle"] = "inf"
+                state[k]["state"]["maxDistance"] = "inf"
+                state[k]["state"]["maxZoom"] = "inf"
+                state[k]["state"]["minAzimuthAngle"] = "-inf"
+
+        tpl = embed.load_requirejs_template
+        if not imports:
+            embed.load_requirejs_template = ""
+
+        s = embed.embed_snippet(self._renderer, state=state)
+        # s = embed.embed_snippet(self.__w, state=state)
+        embed.load_requirejs_template = tpl
+
+        if html_frame:
+            s = "<html>\n<body>\n" + s + "\n</body>\n</html>"
+
+        # Revert changes
+        for _, obj in self.__obj.items():
+            if isinstance(obj, _MeshObject):
+                obj.geometry.attributes["position"].array += mean
+                if obj.bbox is not None:
+                    bbox, _, _ = obj.bbox
+                    bbox.geometry.positions += mean
+            elif isinstance(obj, _PointObject):
+                obj.geometry.attributes["position"].array += mean
+            else:
+                obj.geometry.positions += mean
+        self.__update_view()
+
+        return s
+
+    def save(self, filename: Union[str, Path] = "") -> None:
+        if filename == "":
+            filename = str(uuid.uuid4()) + ".html"
+        filename = Path(filename)
+        filename.write_text(self.to_html())
+        print(f"Plot saved to file {filename}.")
+
+    # --------------
     # Internal Functions
 
     def __add_object(self, obj: Union[_MeshObject, _LineObject, _PointObject]) -> ObjectID:
@@ -467,6 +579,9 @@ class Viewer:
         self._light.position = (mean[0], mean[1], mean[2] + scale)
         self._orbit.exec_three_obj_method("update")
         self._cam.exec_three_obj_method("updateProjectionMatrix")
+
+    def _repr_mimebundle_(self, **kwargs):
+        return self._renderer._repr_mimebundle_(**kwargs)
 
     # --------------
     # Helpers
